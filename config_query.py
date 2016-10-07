@@ -11,8 +11,8 @@ from set_get import *
 logging.basicConfig(level=logging.DEBUG,format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',datefmt='%a, %d %b %Y %H:%M:%S')
 app=Bottle()
 
-@app.route('/applist/:marathon_name',method=['GET','POST'])
-def app_list(marathon_name):
+@app.route('/applist',method=['GET','POST'])
+def app_list():
     """
     :marathon_name 
     """
@@ -21,6 +21,9 @@ def app_list(marathon_name):
             "msg":"",
             "apps":""
             }
+
+    req_data=json.loads(request.body.read())
+    marathon_name=req_data["marathon_name"]
     apps=[]
     sql="select app_id from app_scale_rule where marathon_name='{}'".format(marathon_name)
     #print(sql)
@@ -73,20 +76,21 @@ def app_list(marathon_name):
         logging.error(e)
         return ret
     return ret
-@app.route('/appinfo/:marathon_name/:app_id',method=['GET','POST'])
-def app_info(marathon_name,app_id):
+@app.route('/appinfo',method=['GET','POST'])
+def app_info():
     ret={
             "status":"",
             "result":"",
             "msg":""
             }
     result={
-            "marathon_id":marathon_name,
-            "app_id":app_id,
+            "marathon_id":"",
+            "app_id":"",
             "status":"",
             "count_status":"",
             "event_description":"",
             "scale_up":{
+                "switch":"",
                 "status":"",
                 "mem":"",
                 "cpu":"",
@@ -99,6 +103,7 @@ def app_info(marathon_name,app_id):
                 "max_scale_amount":""
                 },
             "scale_down":{
+                "switch":"",
                 "status":"",
                 "mem":"",
                 "cpu":"",
@@ -111,6 +116,14 @@ def app_info(marathon_name,app_id):
                 "max_scale_amount":""
                 }
             }
+    print("=================================request.body.read======================================================")
+    print(request.body.read())
+    req_data=json.loads(request.body.read())
+    marathon_name=req_data["marathon_name"]
+    app_id=req_data["app_id"]
+    result["marathon_id"]=marathon_name
+    result["app_id"]=app_id
+
     db=DB()
     conn=db.connect_mysql()
 
@@ -141,6 +154,8 @@ def app_info(marathon_name,app_id):
             result["scale_up"]["cool_down_period"]=r_up[0][10]
             result["scale_up"]["scale_amount"]=r_up[0][4]
             result["scale_up"]["max_scale_amount"]=r_up[0][3]
+            result["scale_up"]["switch"]=r_up[0][9]
+            print("scale_up_switch:",r_up[0][9])
 
             if r_up[0][9]==1:
                 result["scale_up"]["status"]=1
@@ -180,6 +195,7 @@ def app_info(marathon_name,app_id):
             result["scale_down"]["cool_down_period"]=r_down[0][10]
             result["scale_down"]["scale_amount"]=r_down[0][4]
             result["scale_down"]["max_scale_amount"]=r_down[0][3]
+            result["scale_down"]["switch"]=r_down[0][9]
             if r_down[0][9]==1:
                 result["scale_down"]["status"]=1
             else:
@@ -211,9 +227,10 @@ def app_info(marathon_name,app_id):
                     result["scale_down"]["ha_queue"]=r_ha_queue[0][0]
         ret["status"]="OK"
         result1={
-                "marathon_id":marathon_name,
+                "marathon_name":marathon_name,
                 "app_id":app_id,
                 "scale_up":{
+                    "switch":result["scale_up"]["switch"],
                     "mem":result["scale_up"]["mem"],
                     "cpu":result["scale_up"]["cpu"],
                     "thread":result["scale_up"]["thread"],
@@ -225,6 +242,7 @@ def app_info(marathon_name,app_id):
                     "max_scale_amount":result["scale_up"]["max_scale_amount"]
                     },
                 "scale_down":{
+                    "switch":result["scale_down"]["switch"],
                     "mem":result["scale_down"]["mem"],
                     "cpu":result["scale_down"]["cpu"],
                     "thread":result["scale_down"]["thread"],
@@ -254,7 +272,7 @@ def rule_set():
         print("rule:",rule)
         db=DB()
         conn=db.connect_mysql()
-        marathon_name=rule["marathon_id"]
+        marathon_name=rule["marathon_name"]
         print("marathon_name:",marathon_name)
         app_id=rule["app_id"]
         scale_up=rule["scale_up"]
@@ -263,7 +281,7 @@ def rule_set():
         print("scale_up:",scale_up)
         print(scale_up!=None)
         if scale_up!=None and scale_up!=[] and scale_up!="":
-            up_status=1
+            up_status=scale_up["switch"]
             up_scale_type='up'
             if scale_up["mem"]!=None and scale_up["mem"]!=0 and scale_up["mem"]!="":
                 up_mem=1
@@ -345,7 +363,7 @@ def rule_set():
         print("scale_down:",scale_down)
         print(scale_down!=None)
         if scale_down!=None:
-            d_status=1
+            d_status=scale_down["switch"]
             d_scale_type='down'
             #d_mem=scale_down["mem"]
             if scale_down["mem"]!=None and scale_down["mem"]!=0 and scale_down["mem"]!="":
@@ -447,17 +465,18 @@ def rule_update():
         print("rule:",rule)
         db=DB()
         conn=db.connect_mysql()
-        marathon_name=rule["marathon_id"]
+        marathon_name=rule["marathon_name"]
         print("marathon_name:",marathon_name)
         app_id=rule["app_id"]
         scale_up=rule["scale_up"]
         logging.debug("scale_up:{}".format(scale_up))
         print(scale_up!=None)
         if scale_up!=None:
+            db.update_mysql(conn,"update app_scale_rule set switch={} where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["switch"],marathon_name,app_id))
             if scale_up["collect_period"]!="":
                 up_cp=db.select_mysql(conn,"select collect_period from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 if up_cp!=None and up_cp!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set collect_period={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["collect_period"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set collect_period={} where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["collect_period"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_up:collect_period of {}:{} not setted.".format(marathon_name,app_id)
@@ -465,7 +484,7 @@ def rule_update():
             if scale_up["continue_period"]!="":
                 up_ctp=db.select_mysql(conn,"select continue_period from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 if up_ctp!=None and up_ctp!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set continue_period={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["continue_period"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set continue_period={} where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["continue_period"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_up:continue_period of {}:{} not setted.".format(marathon_name,app_id)
@@ -473,7 +492,7 @@ def rule_update():
             if scale_up["cool_down_period"]!="":
                 up_cd=db.select_mysql(conn,"select cold_time from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 if up_cd!=None and up_cd!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set cold_time={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["cool_down_period"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set cold_time={} where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["cool_down_period"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_up:cool_time of {}:{} not setted.".format(marathon_name,app_id)
@@ -481,7 +500,7 @@ def rule_update():
             if scale_up["scale_amount"]!="":
                 up_sa=db.select_mysql(conn,"select per_auto_scale from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 if up_sa!=None and up_sa!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set per_auto_scale={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["scale_amount"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set per_auto_scale={} where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["scale_amount"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_up:per_auto_scale of {}:{} not setted.".format(marathon_name,app_id)
@@ -489,69 +508,106 @@ def rule_update():
             if scale_up["max_scale_amount"]!="":
                 up_ms=db.select_mysql(conn,"select scale_threshold from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 if up_ms!=None and up_ms!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set scale_threshold={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["max_scale_amount"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set scale_threshold={} where marathon_name='{}' and app_id='{}' and scale_type='up'".format(scale_up["max_scale_amount"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_up:scale_threshold of {}:{} not setted.".format(marathon_name,app_id)
                     return result
-            if scale_up["mem"]!=None and scale_up["mem"]!="" and scale_up["mem"]!=0:
+            if scale_up["mem"]!=None and scale_up["mem"]!="":
                 up_mem=db.select_mysql(conn,"select memory from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 logging.debug("up_mem:{}".format(up_mem))
                 if up_mem!=None and up_mem!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set memory=1,switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
-                    q_mem=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(marathon_name,app_id))
-                    if q_mem!=None and q_mem!=[]:
-                        db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(scale_up["mem"],marathon_name,app_id))
+                    if scale_up["mem"]!=0:
+                        db.update_mysql(conn,"update app_scale_rule set memory=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
+                        q_mem=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(marathon_name,app_id))
+                        if q_mem!=None and q_mem!=[]:
+                            db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(scale_up["mem"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} memory in quota_info not setted".format(marathon_name,app_id)
                     else:
-                        result["status"]="NOT OK"
-                        result["msg"]="{}:{} memory in quota_info not setted".format(marathon_name,app_id)
+                        db.update_mysql(conn,"update app_scale_rule set memory=0 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
+                        q_mem=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(marathon_name,app_id))
+                        if q_mem!=None and q_mem!=[]:
+                            db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(scale_up["mem"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} memory in quota_info not setted".format(marathon_name,app_id)
+
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_up mem of {} {} not setted!".format(marathon_name,app_id)
                     return result
-            if scale_up["cpu"]!=None and scale_up["cpu"]!="" and scale_up["cpu"]!=0:
+            if scale_up["cpu"]!=None and scale_up["cpu"]!="":
                 up_cpu=db.select_mysql(conn,"select cpu from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 logging.debug("up_cpu:{}".format(up_cpu))
                 if up_cpu!=None and up_cpu!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set cpu=1,switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
-                    q_cpu=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(marathon_name,app_id))
-                    if q_cpu!=None and q_cpu!=[]:
-                        db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(scale_up["cpu"],marathon_name,app_id))
+                    if scale_up["cpu"]!=0:
+                        db.update_mysql(conn,"update app_scale_rule set cpu=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
+                        q_cpu=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(marathon_name,app_id))
+                        if q_cpu!=None and q_cpu!=[]:
+                            db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(scale_up["cpu"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} cpu in quota_info not setted".format(marathon_name,app_id)
                     else:
-                        result["status"]="NOT OK"
-                        result["msg"]="{}:{} cpu in quota_info not setted".format(marathon_name,app_id)
+                        db.update_mysql(conn,"update app_scale_rule set cpu=0 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
+                        q_cpu=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(marathon_name,app_id))
+                        if q_cpu!=None and q_cpu!=[]:
+                            db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(scale_up["cpu"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} cpu in quota_info not setted".format(marathon_name,app_id)
                         
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_up cpu of {} {} not setted!".format(marathon_name,app_id)
                     return result
-            if scale_up["thread"]!=None and scale_up["thread"]!="" and scale_up["thread"]!=0:
+            if scale_up["thread"]!=None and scale_up["thread"]!="":
                 up_thread=db.select_mysql(conn,"select thread from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 logging.debug("up_thread:{}".format(up_thread))
                 if up_thread!=None and up_thread!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set thread=1,switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
-                    q_thread=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(marathon_name,app_id))
-                    if q_thread!=None and q_thread!=[]:
-                        db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(scale_up["thread"],marathon_name,app_id))
+                    if scale_up["thread"]!=0:
+                        db.update_mysql(conn,"update app_scale_rule set thread=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
+                        q_thread=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(marathon_name,app_id))
+                        if q_thread!=None and q_thread!=[]:
+                            db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(scale_up["thread"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} thread in quota_info not setted".format(marathon_name,app_id)
                     else:
-                        result["status"]="NOT OK"
-                        result["msg"]="{}:{} thread in quota_info not setted".format(marathon_name,app_id)
+                        db.update_mysql(conn,"update app_scale_rule set thread=0 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
+                        q_thread=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(marathon_name,app_id))
+                        if q_thread!=None and q_thread!=[]:
+                            db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(scale_up["thread"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} thread in quota_info not setted".format(marathon_name,app_id)
                         
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_up thread of {} {} not setted!".format(marathon_name,app_id)
                     return result
-            if scale_up["request_queue"]!=None and scale_up["request_queue"]!="" and scale_up["request_queue"]!=0:
+            if scale_up["request_queue"]!=None and scale_up["request_queue"]!="":
                 up_ha_queue=db.select_mysql(conn,"select ha_queue from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
                 logging.debug("up_ha_queue:{}".format(up_ha_queue))
                 if up_ha_queue!=None and up_ha_queue!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set ha_queue=1,switch=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
-                    q_ha_queue=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(marathon_name,app_id))
-                    if q_ha_queue!=None and q_ha_queue!=[]:
-                        db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(scale_up["request_queue"],marathon_name,app_id))
+                    if scale_up["request_queue"]!=0:
+                        db.update_mysql(conn,"update app_scale_rule set ha_queue=1 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
+                        q_ha_queue=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(marathon_name,app_id))
+                        if q_ha_queue!=None and q_ha_queue!=[]:
+                            db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(scale_up["request_queue"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} ha_queue in quota_info not setted".format(marathon_name,app_id)
                     else:
-                        result["status"]="NOT OK"
-                        result["msg"]="{}:{} ha_queue in quota_info not setted".format(marathon_name,app_id)
+                        db.update_mysql(conn,"update app_scale_rule set ha_queue=0 where marathon_name='{}' and app_id='{}' and scale_type='up'".format(marathon_name,app_id))
+                        q_ha_queue=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(marathon_name,app_id))
+                        if q_ha_queue!=None and q_ha_queue!=[]:
+                            db.update_mysql(conn,"update quota_info set max_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(scale_up["request_queue"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} ha_queue in quota_info not setted".format(marathon_name,app_id)
                         
                 else:
                     result["status"]="NOT OK"
@@ -560,10 +616,11 @@ def rule_update():
         scale_down=rule["scale_down"]
         logging.debug("scale_down:{}".format(scale_down))
         if scale_down!=None:
+            db.update_mysql(conn,"update app_scale_rule set switch={} where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["switch"],marathon_name,app_id))
             if scale_down["collect_period"]!="":
                 d_up_cp=db.select_mysql(conn,"select collect_period from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 if d_up_cp!=None and d_up_cp!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set collect_period={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["collect_period"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set collect_period={} where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["collect_period"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_down:collect_period of {}:{} not setted.".format(marathon_name,app_id)
@@ -571,7 +628,7 @@ def rule_update():
             if scale_down["continue_period"]!="":
                 d_up_ctp=db.select_mysql(conn,"select continue_period from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 if d_up_ctp!=None and d_up_ctp!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set continue_period={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["continue_period"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set continue_period={} where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["continue_period"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_down:continue_period of {}:{} not setted.".format(marathon_name,app_id)
@@ -579,7 +636,7 @@ def rule_update():
             if scale_down["cool_down_period"]!="":
                 d_up_cd=db.select_mysql(conn,"select cold_time from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 if d_up_cd!=None and d_up_cd!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set cold_time={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["cool_down_period"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set cold_time={} where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["cool_down_period"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_down:cool_time of {}:{} not setted.".format(marathon_name,app_id)
@@ -587,7 +644,7 @@ def rule_update():
             if scale_down["scale_amount"]!="":
                 d_up_sa=db.select_mysql(conn,"select per_auto_scale from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 if d_up_sa!=None and d_up_sa!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set per_auto_scale={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["scale_amount"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set per_auto_scale={} where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["scale_amount"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_down:per_auto_scale of {}:{} not setted.".format(marathon_name,app_id)
@@ -595,53 +652,80 @@ def rule_update():
             if scale_down["max_scale_amount"]!="":
                 d_up_ms=db.select_mysql(conn,"select scale_threshold from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 if d_up_ms!=None and d_up_ms!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set scale_threshold={},switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["max_scale_amount"],marathon_name,app_id))
+                    db.update_mysql(conn,"update app_scale_rule set scale_threshold={} where marathon_name='{}' and app_id='{}' and scale_type='down'".format(scale_down["max_scale_amount"],marathon_name,app_id))
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_down:scale_threshold of {}:{} not setted.".format(marathon_name,app_id)
                     return result
-            if scale_down["mem"]!=None and scale_down["mem"]!="" and scale_down["mem"]!=0:
+            if scale_down["mem"]!=None and scale_down["mem"]!="":
                 d_up_mem=db.select_mysql(conn,"select memory from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 logging.debug("d_up_mem:{}".format(d_up_mem))
                 if d_up_mem!=None and d_up_mem!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set memory=1,switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
-                    d_q_mem=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(marathon_name,app_id))
-                    if d_q_mem!=None and d_q_mem!=[]:
-                        db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(scale_down["mem"],marathon_name,app_id))
+                    if scale_down["mem"]!=0:
+                        db.update_mysql(conn,"update app_scale_rule set memory=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
+                        d_q_mem=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(marathon_name,app_id))
+                        if d_q_mem!=None and d_q_mem!=[]:
+                            db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(scale_down["mem"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} memory in quota_info not setted".format(marathon_name,app_id)
                     else:
-                        result["status"]="NOT OK"
-                        result["msg"]="{}:{} memory in quota_info not setted".format(marathon_name,app_id)
+                        db.update_mysql(conn,"update app_scale_rule set memory=0 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
+                        d_q_mem=db.select_mysql(conn,"select max_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(marathon_name,app_id))
+                        if d_q_mem!=None and d_q_mem!=[]:
+                            db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='memory'".format(scale_down["mem"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} memory in quota_info not setted".format(marathon_name,app_id)
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_down mem of {} {} not setted!".format(marathon_name,app_id)
                     return result
-            if scale_down["cpu"]!=None and scale_down["cpu"]!="" and scale_down["cpu"]!=0:
+            if scale_down["cpu"]!=None and scale_down["cpu"]!="":
                 d_up_cpu=db.select_mysql(conn,"select cpu from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 logging.debug("d_up_cpu:{}".format(d_up_cpu))
                 if d_up_cpu!=None and d_up_cpu!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set cpu=1,switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
-                    d_q_cpu=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(marathon_name,app_id))
-                    if d_q_cpu!=None and d_q_cpu!=[]:
-                        db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(scale_down["cpu"],marathon_name,app_id))
+                    if scale_down["cpu"]!=0:
+                        db.update_mysql(conn,"update app_scale_rule set cpu=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
+                        d_q_cpu=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(marathon_name,app_id))
+                        if d_q_cpu!=None and d_q_cpu!=[]:
+                            db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(scale_down["cpu"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} cpu in quota_info not setted".format(marathon_name,app_id)
                     else:
-                        result["status"]="NOT OK"
-                        result["msg"]="{}:{} cpu in quota_info not setted".format(marathon_name,app_id)
+                        db.update_mysql(conn,"update app_scale_rule set cpu=0 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
+                        d_q_cpu=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(marathon_name,app_id))
+                        if d_q_cpu!=None and d_q_cpu!=[]:
+                            db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='cpu'".format(scale_down["cpu"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} cpu in quota_info not setted".format(marathon_name,app_id)
                         
                 else:
                     result["status"]="NOT OK"
                     result["msg"]="scale_down cpu of {} {} not setted!".format(marathon_name,app_id)
                     return result
-            if scale_down["thread"]!=None and scale_down["thread"]!="" and scale_down["thread"]!=0:
+            if scale_down["thread"]!=None and scale_down["thread"]!="":
                 d_up_thread=db.select_mysql(conn,"select thread from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 logging.debug("d_up_thread:{}".format(d_up_thread))
                 if d_up_thread!=None and d_up_thread!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set thread=1,switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
-                    d_q_thread=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(marathon_name,app_id))
-                    if d_q_thread!=None and d_q_thread!=[]:
-                        db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(scale_down["thread"],marathon_name,app_id))
-                    else:
-                        result["status"]="NOT OK"
-                        result["msg"]="{}:{} thread in quota_info not setted".format(marathon_name,app_id)
+                        if scale_down["thread"]!=0:
+                            db.update_mysql(conn,"update app_scale_rule set thread=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
+                            d_q_thread=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(marathon_name,app_id))
+                            if d_q_thread!=None and d_q_thread!=[]:
+                                db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(scale_down["thread"],marathon_name,app_id))
+                            else:
+                                result["status"]="NOT OK"
+                                result["msg"]="{}:{} thread in quota_info not setted".format(marathon_name,app_id)
+                        else:
+                            db.update_mysql(conn,"update app_scale_rule set thread=0 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
+                            d_q_thread=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(marathon_name,app_id))
+                            if d_q_thread!=None and d_q_thread!=[]:
+                                db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='thread'".format(scale_down["thread"],marathon_name,app_id))
+                            else:
+                                result["status"]="NOT OK"
+                                result["msg"]="{}:{} thread in quota_info not setted".format(marathon_name,app_id)
                         
                 else:
                     result["status"]="NOT OK"
@@ -651,13 +735,22 @@ def rule_update():
                 d_up_ha_queue=db.select_mysql(conn,"select ha_queue from app_scale_rule where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
                 logging.debug("d_up_ha_queue:{}".format(d_up_ha_queue))
                 if d_up_ha_queue!=None and d_up_ha_queue!=[]:
-                    db.update_mysql(conn,"update app_scale_rule set ha_queue=1,switch=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
-                    d_q_ha_queue=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(marathon_name,app_id))
-                    if d_q_ha_queue!=None and d_q_ha_queue!=[]:
-                        db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(scale_down["request_queue"],marathon_name,app_id))
+                    if scale_down["request_queue"]!=0:
+                        db.update_mysql(conn,"update app_scale_rule set ha_queue=1 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
+                        d_q_ha_queue=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(marathon_name,app_id))
+                        if d_q_ha_queue!=None and d_q_ha_queue!=[]:
+                            db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(scale_down["request_queue"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} ha_queue in quota_info not setted".format(marathon_name,app_id)
                     else:
-                        result["status"]="NOT OK"
-                        result["msg"]="{}:{} ha_queue in quota_info not setted".format(marathon_name,app_id)
+                        db.update_mysql(conn,"update app_scale_rule set ha_queue=0 where marathon_name='{}' and app_id='{}' and scale_type='down'".format(marathon_name,app_id))
+                        d_q_ha_queue=db.select_mysql(conn,"select min_threshold from quota_info where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(marathon_name,app_id))
+                        if d_q_ha_queue!=None and d_q_ha_queue!=[]:
+                            db.update_mysql(conn,"update quota_info set min_threshold={} where marathon_name='{}' and app_id='{}' and rule_type='ha_queue'".format(scale_down["request_queue"],marathon_name,app_id))
+                        else:
+                            result["status"]="NOT OK"
+                            result["msg"]="{}:{} ha_queue in quota_info not setted".format(marathon_name,app_id)
                         
                 else:
                     result["status"]="NOT OK"
@@ -668,13 +761,16 @@ def rule_update():
         return result
     except Exception as e:
         logging.error(e)
-@app.route('/pause/:marathon_name/:app_id',method=['GET','POST'])
-def rule_pause(marathon_name,app_id):
+@app.route('/pause',method=['GET','POST'])
+def rule_pause():
     result={
             "status":"",
             "msgup":"",
             "msgdown":""
             }
+    req_data=json.loads(request.body.read())
+    marathon_name=req_data["marathon_name"]
+    app_id=req_data["app_id"]
     db=DB()
     conn=db.connect_mysql()
     try:
@@ -697,13 +793,16 @@ def rule_pause(marathon_name,app_id):
         reusult["status"]="NOT OK"
         logging.debug(e)
         return result
-@app.route('/recover/:marathon_name/:app_id',method=['GET','POST'])
-def rule_pause(marathon_name,app_id):
+@app.route('/recover',method=['GET','POST'])
+def rule_pause():
     result={
             "status":"",
             "msgup":"",
             "msgdown":""
             }
+    req_data=json.loads(request.body.read())
+    marathon_name=req_data["marathon_name"]
+    app_id=req_data["app_id"]
     db=DB()
     conn=db.connect_mysql()
     try:
@@ -742,5 +841,5 @@ if __name__=="__main__":
     #rule={"marathon_name":"marathon","app_id":"test2"}
     #rule_set(rule)
     #rule_update(rule)
-    app.run(host='192.168.2.17',port=8888)
+    app.run(host='10.254.9.54',port=6061)
 
