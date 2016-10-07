@@ -1,0 +1,6 @@
+﻿config_query.py bug修复文档
+1，之前在url中传参数的统一都改为在request_body中来传，其中涉及到的API：
+applist,appinfo,pause,restart
+2,在更新接口（update）中做了一些必要的补充和逻辑变动,这其中包括：
+（1）对已设置指标（cpu,memory,thread,ha_queue）置零时状态的修改；
+（2）对未设置指标（cpu,memory,thread,ha_queue）默认值的返回；
